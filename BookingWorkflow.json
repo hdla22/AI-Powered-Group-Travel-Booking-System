@@ -1,0 +1,128 @@
+{
+  "name": "BookingWorkflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "BookingWorkflow",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "a1326748-c457-4f69-b284-579f7dea4788",
+      "name": "Webhook",
+      "webhookId": "b88c2f8c-71f0-4d45-b98c-5ee11cf3f522"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "chatgpt-4o-latest",
+          "mode": "list",
+          "cachedResultName": "CHATGPT-4O-LATEST"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=You are an AI Travel Booking Agent for a corporate travel system. \n\nYou have received the following booking request:\n\nBooking Reference: {{$json.bookingReference}}\nTrip ID: {{$json.tripId}}\n\nFlight Details:\n- Flight: {{$json.flightDetails.flightId}} ({{$json.flightDetails.airline}})\n- Route: {{$json.flightDetails.from}} → {{$json.flightDetails.to}}\n- Date: {{$json.flightDetails.date}}\n- Departure: {{$json.flightDetails.departureTime}}\n- Price per ticket: {{$json.flightDetails.price}} {{$json.currency}}\n\nPassengers: {{$json.totalPassengers}} travelers\nTotal Cost: {{$json.totalPrice}} {{$json.currency}}\nPayment: {{$json.paymentMethod}}\n\nYour task:\n1. Confirm this booking is valid and complete\n2. Generate a professional booking confirmation message\n3. List any important travel information or reminders\n4. Respond in JSON format with these fields:\n   - status: \"confirmed\" or \"error\"\n   - bookingId: the booking reference\n   - confirmationMessage: a friendly confirmation paragraph\n   - importantInfo: array of key travel reminders\n   - nextSteps: what passengers should do next\n\nBe professional, helpful, and concise."
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "b7ed293d-cee0-4bd9-bf4f-20cabd7b35bc",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": "Lz7RBGlJQiDFKg0j",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get raw input from previous node (Webhook)\nconst incoming = $input.first().json;\n\n// Support both shapes: with body{} or directly\nconst bookingRequest = incoming.body ?? incoming;\n\n// Basic safety defaults\nconst flight = bookingRequest.selectedFlight || {};\nconst passengers = bookingRequest.passengers || [];\n\n// Generate unique booking reference\nconst bookingRef = `BK${Date.now().toString().slice(-8)}`;\n\n// Make sure price is a number\nconst pricePerPassenger = Number(flight.price ?? 0);\n\n// Total price = price * number of passengers\nconst totalPrice = pricePerPassenger * passengers.length;\n\n// Return structured booking object\nreturn {\n  json: {\n    bookingReference: bookingRef,\n    tripId: bookingRequest.tripId,\n    flightDetails: flight,\n    passengers: passengers,\n    totalPassengers: passengers.length,\n    totalPrice: totalPrice,\n    currency: \"SAR\",\n    paymentMethod: bookingRequest.paymentMethod,\n    bookingTimestamp: new Date().toISOString()\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "985166b8-c7ad-4cbd-aaf2-2ae1b57a9d95",
+      "name": "Structure data for AI Agent"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1) Read booking context safely\nconst bookingItems = $items('Structure data for AI Agent');\n\nif (!bookingItems || bookingItems.length === 0) {\n\tthrow new Error(\"Booking context node returned NO data\");\n}\n\nconst bookingContext = bookingItems[0].json;\n\n// 2) Read AI output safely\nconst inputItems = $input.all();\n\nif (!inputItems || inputItems.length === 0) {\n\tthrow new Error(\"AI node returned NO data\");\n}\n\nconst llmOutput = inputItems[0].json;\n\n// 3) Extract raw text safely\nlet rawJson = '';\n\nif (typeof llmOutput === 'string') {\n\trawJson = llmOutput;\n}\nelse if (llmOutput.text) {\n\trawJson = llmOutput.text;\n}\nelse if (llmOutput.output?.[0]?.content?.[0]?.text) {\n\trawJson = llmOutput.output[0].content[0].text;\n}\nelse {\n\tthrow new Error(\"AI response format NOT recognized\");\n}\n\n// 4) Clean JSON safely\nrawJson = rawJson\n\t.replace(/```json/g, '')\n\t.replace(/```/g, '')\n\t.trim()\n\t.replace(/,\\s*}/g, '}')\n\t.replace(/,\\s*]/g, ']');\n\n// 5) Parse AI JSON\nlet aiResponse;\ntry {\n\taiResponse = JSON.parse(rawJson);\n} catch (err) {\n\tthrow new Error(\"AI returned INVALID JSON: \" + rawJson);\n}\n\n// 6) Build final confirmation safely\nconst result = {\n\tsuccess: true,\n\ttripId: bookingContext.tripId || null,\n\tbookingReference: bookingContext.bookingReference || null,\n\tbookingTimestamp: bookingContext.bookingTimestamp || new Date().toISOString(),\n\n\tflightDetails: {\n\t\tflightId: bookingContext.flightDetails?.flightId || null,\n\t\tairline: bookingContext.flightDetails?.airline || null,\n\t\troute: `${bookingContext.flightDetails?.from || \"?\"} → ${bookingContext.flightDetails?.to || \"?\"}`,\n\t\tdate: bookingContext.flightDetails?.date || null,\n\t\tdepartureTime: bookingContext.flightDetails?.departureTime || null,\n\t},\n\n\tpassengers: bookingContext.passengers || [],\n\n\tpricing: {\n\t\tpricePerTicket: bookingContext.flightDetails?.price || 0,\n\t\ttotalPassengers: bookingContext.totalPassengers || 0,\n\t\ttotalCost: bookingContext.totalPrice || 0,\n\t\tcurrency: bookingContext.currency || \"SAR\",\n\t},\n\n\taiConfirmation: {\n\t\tstatus: aiResponse.status || \"confirmed\",\n\t\tmessage: aiResponse.confirmationMessage || \"\",\n\t\timportantInfo: aiResponse.importantInfo || \"\",\n\t\tnextSteps: aiResponse.nextSteps || \"\",\n\t},\n\n\ttickets: (bookingContext.passengers || []).map((p, index) => ({\n\t\tticketNumber: `${bookingContext.bookingReference || \"BK\"}-${index + 1}`,\n\t\tpassengerName: p.name || \"Unknown\",\n\t\temail: p.email || \"\",\n\t}))\n};\n\n// 7) Return final output\nreturn [{ json: result }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        0
+      ],
+      "id": "741ac52e-58c8-47a7-9243-310fffadda3b",
+      "name": "Generate Final Booking Confirmation"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Structure data for AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Generate Final Booking Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structure data for AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "3ecff892-b6bb-4865-8546-8c3cc4e9223a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f47c38665e625263cf21449a531821b9a948f41a167bc36c083b9be852420722"
+  },
+  "id": "TuTyVmeEakH0C11S",
+  "tags": []
+}

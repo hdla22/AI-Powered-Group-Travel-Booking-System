@@ -1,0 +1,83 @@
+{
+  "name": "SuggestionWorkflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "SuggestionsWorkflow",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "8f5e8204-993f-46be-aace-91c080a32d0a",
+      "name": "Webhook",
+      "webhookId": "fd9ae071-ce76-4d2f-9b91-2fa389017ad9"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get first item from webhook\nconst item = $input.all()[0];\n\n// Handle both cases: with body or without\nconst surveyData = item.json.body ?? item.json;\n\n// Extract team members\nconst teamMembers = surveyData.teamMembers;\n\n// Validate input\nif (!Array.isArray(teamMembers) || teamMembers.length === 0) {\n  return [\n    {\n      json: {\n        error: 'teamMembers is missing or not an array',\n        got: surveyData,\n      },\n    },\n  ];\n}\n\n// -------- Vote counting --------\n\n// Count date votes\nconst dateVotes = {};\nteamMembers.forEach(member => {\n  const date = member.preferredDate;\n  if (!date) return;\n  dateVotes[date] = (dateVotes[date] || 0) + 1;\n});\n\n// Count time votes\nconst timeVotes = {};\nteamMembers.forEach(member => {\n  const time = member.preferredTime;\n  if (!time) return;\n  timeVotes[time] = (timeVotes[time] || 0) + 1;\n});\n\n// Validate votes\nif (Object.keys(dateVotes).length === 0 || Object.keys(timeVotes).length === 0) {\n  return [\n    {\n      json: {\n        error: 'No valid preferredDate or preferredTime found',\n        got: teamMembers,\n      },\n    },\n  ];\n}\n\n// Pick winning date\nconst winningDate = Object.keys(dateVotes).reduce((a, b) =>\n  dateVotes[a] >= dateVotes[b] ? a : b\n);\n\n// Pick winning time\nconst winningTime = Object.keys(timeVotes).reduce((a, b) =>\n  timeVotes[a] >= timeVotes[b] ? a : b\n);\n\n// Calculate agreement percentages\nconst totalVotes = teamMembers.length;\nconst datePercentage = Math.round((dateVotes[winningDate] / totalVotes) * 100);\nconst timePercentage = Math.round((timeVotes[winningTime] / totalVotes) * 100);\n\n// Return final result\nreturn [\n  {\n    json: {\n      tripId: surveyData.tripId,\n      fromCity: surveyData.fromCity,\n      toCity: surveyData.toCity,\n      recommendedDate: winningDate,\n      recommendedTime: winningTime,\n      analysis: {\n        dateVotes,\n        timeVotes,\n        dateConsensus: `${datePercentage}% agreement`,\n        timeConsensus: `${timePercentage}% agreement`,\n      },\n      totalParticipants: totalVotes,\n    },\n  },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "511b78f4-078a-4aed-8562-9ad44cd810e1",
+      "name": "Survey Analysis"
+    },
+    {
+      "parameters": {
+        "jsCode": "const recommendation = $input.all()[0].json;\n\n// Simulated flight database\nconst flightDatabase = [\n  {\n    flightId: \"SV101\",\n    from: \"Riyadh\",\n    to: \"Dubai\",\n    date: \"2025-12-15\",\n    departureTime: \"08:00\",\n    arrivalTime: \"10:30\",\n    timeCategory: \"morning\",\n    price: 850,\n    seats: 45\n  },\n  {\n    flightId: \"EK202\",\n    from: \"Riyadh\",\n    to: \"Dubai\",\n    date: \"2025-12-15\",\n    departureTime: \"14:00\",\n    arrivalTime: \"16:30\",\n    timeCategory: \"afternoon\",\n    price: 920,\n    seats: 30\n  },\n  {\n    flightId: \"SV103\",\n    from: \"Riyadh\",\n    to: \"Dubai\",\n    date: \"2025-12-16\",\n    departureTime: \"09:30\",\n    arrivalTime: \"12:00\",\n    timeCategory: \"morning\",\n    price: 870,\n    seats: 50\n  },\n  {\n    flightId: \"FZ305\",\n    from: \"Riyadh\",\n    to: \"Dubai\",\n    date: \"2025-12-15\",\n    departureTime: \"06:30\",\n    arrivalTime: \"09:00\",\n    timeCategory: \"morning\",\n    price: 750,\n    seats: 25\n  }\n];\n\n// Filter flights matching route, date, and time preference\nconst matchedFlights = flightDatabase.filter(flight => \n  flight.from === recommendation.fromCity &&\n  flight.to === recommendation.toCity &&\n  flight.date === recommendation.recommendedDate &&\n  flight.timeCategory === recommendation.recommendedTime\n);\n\n// Sort by price (cheapest first)\nmatchedFlights.sort((a, b) => a.price - b.price);\n\n// Take top 3 recommendations\nconst topRecommendations = matchedFlights.slice(0, 3);\n\nreturn {\n  tripId: recommendation.tripId,\n  recommendation: recommendation,\n  suggestedFlights: topRecommendations,\n  alternativeDate: recommendation.recommendedDate, // Could add logic for backup dates\n  message: `Found ${topRecommendations.length} flights matching team preferences`\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "e33bf6fc-750f-4a16-8979-3fbe7f8f1612",
+      "name": "Flight Matcher"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Survey Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Survey Analysis": {
+      "main": [
+        [
+          {
+            "node": "Flight Matcher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "b539001d-cc9d-4921-812a-844c474a730b",
+  "meta": {
+    "instanceId": "f47c38665e625263cf21449a531821b9a948f41a167bc36c083b9be852420722"
+  },
+  "id": "eb7uwEUCp3dCilhz",
+  "tags": []
+}
